@@ -1,0 +1,288 @@
+#!/usr/bin/env ruby
+### rollavg --- Utility for calculating a simple rolling average.
+## Copyright 2006 by Dave Pearson <davep@davep.org>
+## $Revision: 1.8 $
+##
+## rollavg is free software distributed under the terms of the GNU General
+## Public Licence, version 2. For details see the file COPYING.
+
+############################################################################
+# Add a rounding method to the Float class.
+class Float
+
+  def round_to( n )
+    ( self * ( 10 ** n ) ).round.to_f / ( 10 ** n )
+  end
+  
+end
+
+############################################################################
+# Class for tracking and calculating a rolling average (mean).
+class RollingAverage
+
+  # Constructor
+  def initialize( window_size )
+
+    # Remember the window size.
+    @window_size = window_size
+
+    # Initialise the array.
+    @window = Array.new()
+    
+  end
+
+  # Add a value.
+  def add( n )
+
+    # Add the value to the end of the window.
+    @window << n
+
+    # If the window is longer than the required length...
+    if @window.length > @window_size
+      # ...remove the oldest item.
+      @window.delete_at( 0 )
+    end
+    
+  end
+
+  # Get the average.
+  def average
+
+    if @window.length == 0
+      0
+    else
+      ( @window.inject( 0 ) {|x,y| x + y } ) / @window.length
+    end
+    
+  end
+
+  def narrow
+    if @window.length > 0
+      @window.delete_at( 0 )
+    end
+  end
+  
+end
+
+############################################################################
+# Class for tracking and calculating a rolling average (mode).
+class RollingMode < RollingAverage
+
+  # Get the average (mode).
+  def average
+    
+    if @window.length.zero?
+      0
+    else
+      
+      counts = {}
+      
+      @window.each() do |n|
+        if counts.has_key?( n )
+          counts[ n ] = counts[ n ] + 1
+        else
+          counts[ n ] = 1
+        end
+      end
+
+      # TODO. More checking. No clear winner?
+      ( counts.sort() {|a,b| b[ 1 ] <=> a[ 1 ] } )[ 0 ][ 0 ]
+      
+    end
+    
+  end
+  
+end
+
+############################################################################
+# Class for tracking and calculating a rolling average compass (mean).
+class RollingCompass
+
+  # Constructor
+  def initialize( window_size )
+
+    @x = RollingAverage.new( window_size )
+    @y = RollingAverage.new( window_size )
+    
+  end
+
+  # Add a value.
+  def add( n )
+    
+    @x.add( Math.sin( ( n / 360.0 ) * ( Math::PI * 2 ) ) )
+    @y.add( Math.cos( ( n / 360.0 ) * ( Math::PI * 2 ) ) )
+    
+  end
+
+  # Get the average.
+  def average
+
+    res = ( Math.atan2( @x.average(), @y.average() ) * ( 180 / Math::PI ) ).round_to( 2 )
+
+    if res < 0    then res += 360 end
+    if res == 360 then res = 0    end
+      
+    res
+    
+  end
+
+  def narrow
+    @x.narrow()
+    @y.narrow()
+  end
+
+end
+
+############################################################################
+# Main utility code.
+
+# We're going to use long options.
+require "getoptlong"
+
+# Set the default parameters.
+$params = {
+  :delimeter  => " ",
+  :field      => 1,
+  :help       => false,
+  :licence    => false,
+  :replace    => false,
+  :type       => "mean",
+  :windowsize => 10,
+  :zerotest   => false,
+  :zerofield  => 1
+}
+
+# Print the help screen.
+def printHelp
+  print "rollavg v#{/(\d+\.\d+)/.match( '$Revision: 1.8 $' )[ 1 ]}
+Copyright 2006 by Dave Pearson <davep@davep.org>
+http://www.davep.org/
+
+Supported command line options:
+
+  -d --delimeter <text>    Specify the field delimeter.
+                           (default is a space).
+  -f --field <field>       Specify which field to average.
+                           (default is 1).
+  -r --replace             Do a replace of the chosen field with the average
+                           when printing output. Default is to only print the
+                           rolling average.
+  -t --type <type>         Type of average. Either `mean', `mode' or
+                           'compass'.
+  -w --windowsize <size>   Specify the size of the window.
+                           (default is 10).
+     --zerofield <field>   Specify which field should be used for the zero
+                           test.
+     --zerotest            Don't use a value in the average calculation
+                           if the field specified by --zerofield is zero.
+  -L --licence             Display the licence for this program.
+  -h --help                Display this help.
+"
+  end
+
+# Print the licence.
+def printLicence
+  print "rollavg - Utility for calculating a simple rolling average.
+Copyright (C) 2006 Dave Pearson <davep@davep.org>
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
+Software Foundation; either version 2 of the License, or (at your option)
+any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+more details.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 675 Mass
+Ave, Cambridge, MA 02139, USA.
+
+"
+end
+
+# Get the arguments from the command line.
+begin
+  GetoptLong.new().set_options(
+                               [ "--delimeter",  "-d", GetoptLong::REQUIRED_ARGUMENT ],
+                               [ "--field",      "-f", GetoptLong::REQUIRED_ARGUMENT ],
+                               [ "--help",       "-h", GetoptLong::NO_ARGUMENT       ],
+                               [ "--licence",    "-L", GetoptLong::NO_ARGUMENT       ],
+                               [ "--replace",    "-r", GetoptLong::NO_ARGUMENT       ],
+                               [ "--type",       "-t", GetoptLong::REQUIRED_ARGUMENT ],
+                               [ "--windowsize", "-w", GetoptLong::REQUIRED_ARGUMENT ],
+                               [ "--zerofield",        GetoptLong::REQUIRED_ARGUMENT ],
+                               [ "--zerotest",         GetoptLong::NO_ARGUMENT ]
+                               ).each {|name, value| $params[ name.gsub( /^--/, "" ).intern ] = value }
+rescue GetoptLong::Error
+  printHelp()
+  exit 1
+end
+
+# The need for help overrides everything else
+if $params[ :help ]
+  printHelp()
+elsif $params[ :licence ]
+  # As does the need for the legal mumbojumbo
+  printLicence()
+else
+
+  # Ensure the numeric parameters are numeric.
+  $params[ :field ]      = $params[ :field ].to_i
+  $params[ :windowsize ] = $params[ :windowsize ].to_i
+  $params[ :zerofield ]  = $params[ :zerofield ].to_i
+  
+  # Create the average object.
+  if $params[ :type ] == "mode"
+    avg = RollingMode.new( $params[ :windowsize ] )
+  elsif $params[ :type ] == "compass"
+    avg = RollingCompass.new( $params[ :windowsize ] )
+  else
+    avg = RollingAverage.new( $params[ :windowsize ] )
+  end
+  
+  # For each file given on the command line (or from stdin if no files were
+  # given)...
+  ( ARGV.length == 0 ? ( "-" ) : ARGV ).each do |file|
+
+    # Process the file. Note that "-" means process stdin.
+    ( file == "-" ? $stdin : File.open( file ) ).each  do |line|
+
+      # Split the line into fields.
+      fields = line.chomp.split( $params[ :delimeter ] )
+
+      # Does the field we're after exist?
+      if fields.length >= $params[ :field ]
+        # Should we add it to the average?
+        if !$params[ :zerotest ] or ( $params[ :zerotest ] and fields[ $params[ :zerofield ] - 1 ].to_f > 0 )
+          # Add it to the average object.
+          avg.add( fields[ $params[ :field ] - 1 ].to_f )
+        else
+          # Failed the zero test, narrow the size of the window
+          # instead.
+          avg.narrow()
+        end
+      end
+
+      # If we're doing replaced output
+      if $params[ :replace ]
+        # Replace the chosen field with the average.
+        fields[ $params[ :field ] - 1 ] = avg.average()
+        # Emit the line.
+        print "#{fields.join( $params[ :delimeter ] )}\n"
+      else
+        # Simply print the rolling average.
+        print "#{avg.average()}\n"
+      end
+      
+    end
+
+  end
+
+end
+
+# All's well that ends well.
+exit 0
+
+### rollavg ends here
